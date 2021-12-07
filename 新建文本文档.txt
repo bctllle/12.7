@@ -1,0 +1,220 @@
+  try {
+				run = Runtime.getRuntime();
+				//调用编码器来将wav文件转换为mp3文件
+                //把编码得到的mp3文件先存放到D盘下，然后利用文件拷贝函数将它放到指定的文件夹下同时将D盘下的文件删除
+				Process p=run.exec(filePath+"/"+"lame 16 "+filePath+"/"+file.getName()+" "+tarPath+tarFile.getName()); //16为码率，可自行修改
+				//释放进程
+				p.getOutputStream().close();
+				p.getInputStream().close();
+				p.getErrorStream().close();
+				//等待
+				p.waitFor();
+
+			} catch (Exception e) {
+				e.printStackTrace();
+			}finally{
+				//最后都要执行的语句
+				//run调用lame解码器最后释放内存
+				run.freeMemory();
+			}
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+        }finally{
+        	//关闭流
+        	try {
+        		
+        		if(bais != null)
+        		{
+        			bais.close();
+        		} 
+        		if(ais != null)
+        		{
+        			ais.close();		
+        		}
+			} catch (Exception e) {
+				e.printStackTrace();
+			}   	
+        }
+	}
+	//文件拷贝方法
+	public void copyFile(String srcPath , String destPath)
+	{
+		File srcFile = new File(srcPath);
+		//如果目的文件夹没有则创建目的文件夹
+		(new File(destPath)).mkdirs();
+		//在目的文件夹下创建要复制的文件
+		File destFile = new File(destPath+"/"+srcFile.getName());
+		if(srcFile.isFile() && srcFile.exists())
+		{
+			InputStream in = null;
+			OutputStream out = null;
+			try {
+				in = new FileInputStream(srcFile);
+				out = new FileOutputStream(destFile);
+				//设置缓冲数组
+				byte[] buff = new byte[1024*5];   
+		        int len = 0;   
+		        while ((len = in.read(buff)) != -1) 
+		        {   
+		            out.write(buff, 0, len);   
+		        }
+//		        //测试该函数是否执行
+//		        System.out.println("ok1");
+		         
+			} catch(Exception e) {
+				e.printStackTrace();
+			}finally{
+				//关闭流，先开的后关闭
+				try {
+					if(out != null)
+					{
+						out.close(); 
+					}
+					if(in != null)
+					{
+						in.close();
+					}
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
+			}
+		}
+		//复制过后删除源文件夹中的的文件
+		if(srcFile.exists())
+		{
+			srcFile.delete();
+		}
+	}
+	//设置AudioFormat的参数
+	public AudioFormat getAudioFormat() 
+	{
+		//下面注释部分是另外一种音频格式，两者都可以
+		AudioFormat.Encoding encoding = AudioFormat.Encoding.
+        PCM_SIGNED ;
+		float rate = 8000f;
+		int sampleSize = 16;
+		String signedString = "signed";
+		boolean bigEndian = true;
+		int channels = 1;
+		return new AudioFormat(encoding, rate, sampleSize, channels,
+
+	}
+	//录音类，因为要用到MyRecord类中的变量，所以将其做成内部类
+	class Record implements Runnable
+	{
+		//定义存放录音的字节数组,作为缓冲区
+		byte bts[] = new byte[10000];
+		//将字节数组包装到流里，最终存入到baos中
+		//重写run函数
+		public void run() {	
+			baos = new ByteArrayOutputStream();		
+			try {
+				stopflag = false;
+				while(stopflag != true)
+				{
+					//当停止录音没按下时，该线程一直执行	
+					//从数据行的输入缓冲区读取音频数据。
+					//要读取bts.length长度的字节,cnt 是实际读取的字节数
+					int cnt = td.read(bts, 0, bts.length);
+					if(cnt > 0)
+					{
+						baos.write(bts, 0, cnt);
+					}
+					
+					//开始从音频流中读取字节数
+					byte copyBts[] = bts;
+					bais = new ByteArrayInputStream(copyBts);
+					ais = new AudioInputStream(bais, af, copyBts.length/af.getFrameSize());
+					try{
+						DataLine.Info dataLineInfo = new DataLine.Info(SourceDataLine.class, af);
+			            sd = (SourceDataLine) AudioSystem.getLine(dataLineInfo);
+			            sd.open(af);
+			            sd.start();
+			            
+			            //从音频流中读取
+			            int Buffer_Size = 10000;
+			            audioDataBuffer = new byte[Buffer_Size];
+			            int outBytes;
+			       
+						intBytes = ais.read(audioDataBuffer, 0,audioDataBuffer.length);
+						
+//						不写到混频器中这样就不会播放
+//						if (intBytes >= 0) {
+//							outBytes = sd.write(audioDataBuffer, 0,audioDataBuffer.length);
+//						}   
+					}catch (Exception e) {
+						e.printStackTrace();
+					}
+				}
+			} catch (Exception e) {
+				e.printStackTrace();
+			}finally{
+				try {
+					//intBytes = -1;
+					//关闭打开的字节数组流
+					if(baos != null)
+					{
+						baos.close();
+					}	
+				} catch (Exception e) {
+					e.printStackTrace();
+				}finally{
+					//下面这句td.drain()不能要，这样如果不播放数据就阻塞再次录音会出现其他程序访问错误
+					//td.drain();
+					td.close();
+					//刷新显示波形的面板
+					jp2.repaint();
+				}
+			}
+		}
+		
+	}
+	
+	//画波形的类
+	//因为要使用一些主函数中的数据，所以做成内部类
+	class RecordWave extends JPanel implements Runnable
+	{
+		//用画笔画出波形
+		public void paint(Graphics g)
+		{
+			super.paint(g);
+			g.fillRect(jp2.getX(),jp2.getY() , 800, 380);
+			if( audioDataBuffer != null)
+			{
+				g.drawLine(jp2.getWidth() / 256, 700, jp2.getWidth() / 256, 700);
+				
+				for(int i=0; i<audioDataBuffer.length-1; ++i)
+				{
+					g.setColor(Color.RED);
+					g.drawLine(i * jp2.getWidth() / 256, (int)audioDataBuffer[i]+200 , (i + 1)
+ 
+							* jp2.getWidth() / 256, (int)audioDataBuffer[i+1]+200);
+				}
+			}
+		}
+		public void run() 
+		{
+			//刷新波形
+			while(true)
+			{
+				//System.out.println("ok");
+				try {
+					synchronized (this) {
+						//隔多长时间获取
+						Thread.sleep(300);
+					}
+				} catch (Exception e) {
+ 
+					e.printStackTrace();
+				}
+				this.paint(jp2.getGraphics());
+				//终止线程
+				if(flag == false)
+				{
+					break;
+				}
+			}
+		}	
+	}
+}
